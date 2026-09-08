@@ -1,0 +1,25 @@
+title = "Secure DevSecOps Pipeline - Custom Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "flask-hardcoded-secret-key"
+description = "Detect hardcoded Flask SECRET_KEY values"
+regex = '''(?i)SECRET_KEY[^=\r\n]{0,20}=\s*["']([^"']{8,})["']'''
+secretGroup = 1
+keywords = ["SECRET_KEY"]
+
+[[rules]]
+id = "generic-hardcoded-password"
+description = "Detect potentially hardcoded password assignments"
+regex = '''(?i)(?:password|passwd|pwd)\s*=\s*["']([^"']{8,})["']'''
+secretGroup = 1
+keywords = ["password", "passwd", "pwd"]
+
+[[allowlists]]
+description = "Ignore generated security reports to prevent recursive false positives"
+paths = [
+    '''(^|/)security-reports/''',
+    '''(^|/)ci-reports/'''
+]

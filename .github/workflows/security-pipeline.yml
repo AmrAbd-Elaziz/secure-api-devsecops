@@ -1,0 +1,279 @@
+name: DevSecOps Security Pipeline
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sast-and-secrets:
+    name: SAST and Secret Scanning
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Create report directory
+        run: mkdir -p ci-reports
+
+      - name: Scan current files with Gitleaks
+        run: |
+          docker run --rm \
+            -v "${PWD}:/repo" \
+            zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            dir /repo \
+            --config /repo/.gitleaks.toml \
+            --verbose \
+            --redact=100 \
+            --report-format json \
+            --report-path /repo/ci-reports/gitleaks.json
+
+      - name: Run Semgrep SAST
+        run: |
+          docker run --rm \
+            -v "${PWD}:/src" \
+            semgrep/semgrep@sha256:51c9f53a4fce0d55e9abd08d7b96968654248a4b1122e77f20e0a49c0072446c \
+            semgrep scan \
+            --config auto \
+            --error \
+            --json \
+            --output /src/ci-reports/semgrep.json \
+            /src
+
+      - name: Upload SAST reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sast-and-secret-reports
+          path: ci-reports/
+          if-no-files-found: warn
+
+  dependency-security:
+    name: Dependency Security
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Create report directory
+        run: mkdir -p ci-reports
+
+      - name: Install pip-audit
+        run: python3 -m pip install pip-audit
+
+      - name: Audit Python dependencies
+        run: |
+          pip-audit \
+            -r requirements.txt \
+            --format json \
+            --output ci-reports/pip-audit.json
+
+      - name: Upload dependency report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-security-report
+          path: ci-reports/
+          if-no-files-found: warn
+
+  container-security:
+    name: Container and Dockerfile Security
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Create report directory
+        run: mkdir -p ci-reports
+
+      - name: Scan Dockerfile with Checkov
+        run: |
+          docker run --rm \
+            -v "${PWD}:/workspace" \
+            bridgecrew/checkov@sha256:7407699a91a556849ae66e05c3753f58cf0ce922aa6ddfac7839aad4f390c016 \
+            -f /workspace/Dockerfile \
+            --framework dockerfile \
+            --output json \
+            > ci-reports/checkov.json
+
+      - name: Build remediated container
+        run: |
+          docker build \
+            -t secure-api-remediated:${{ github.sha }} \
+            .
+
+      - name: Generate full Trivy report
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${PWD}/ci-reports:/reports" \
+            aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+            image \
+            --format json \
+            --output /reports/trivy-image.json \
+            secure-api-remediated:${{ github.sha }}
+
+      - name: Enforce critical vulnerability gate
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+            image \
+            --ignore-unfixed \
+            --severity CRITICAL \
+            --exit-code 1 \
+            secure-api-remediated:${{ github.sha }}
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${PWD}/ci-reports:/reports" \
+            aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+            image \
+            --format cyclonedx \
+            --output /reports/sbom.cdx.json \
+            secure-api-remediated:${{ github.sha }}
+
+      - name: Upload container security reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: container-security-reports
+          path: ci-reports/
+          if-no-files-found: warn
+
+  dast-security:
+    name: Dynamic API Security Testing
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Create DAST report directory
+        run: |
+          mkdir -p ci-reports
+          chmod 0777 ci-reports
+
+      - name: Generate and mask temporary CI credentials
+        run: |
+          SECRET_KEY=$(openssl rand -hex 32)
+          ADMIN_PASSWORD=$(openssl rand -hex 20)
+          ALICE_PASSWORD=$(openssl rand -hex 20)
+          BOB_PASSWORD=$(openssl rand -hex 20)
+
+          echo "::add-mask::${SECRET_KEY}"
+          echo "::add-mask::${ADMIN_PASSWORD}"
+          echo "::add-mask::${ALICE_PASSWORD}"
+          echo "::add-mask::${BOB_PASSWORD}"
+
+          {
+            echo "SECRET_KEY=${SECRET_KEY}"
+            echo "ADMIN_PASSWORD=${ADMIN_PASSWORD}"
+            echo "ALICE_PASSWORD=${ALICE_PASSWORD}"
+            echo "BOB_PASSWORD=${BOB_PASSWORD}"
+          } >> "$GITHUB_ENV"
+
+      - name: Build remediated API image
+        run: |
+          docker build \
+            -t secure-api-remediated:${{ github.sha }} \
+            .
+
+      - name: Create isolated DAST network
+        run: docker network create security-lab
+
+      - name: Start remediated API
+        run: |
+          docker run -d \
+            --name secure-api-remediated \
+            --network security-lab \
+            -p 5000:5000 \
+            -e SECRET_KEY="${SECRET_KEY}" \
+            -e ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+            -e ALICE_PASSWORD="${ALICE_PASSWORD}" \
+            -e BOB_PASSWORD="${BOB_PASSWORD}" \
+            -e DEFAULT_RATE_LIMIT="10000 per hour" \
+            -e LOGIN_RATE_LIMIT="10000 per hour" \
+            secure-api-remediated:${{ github.sha }}
+
+      - name: Wait for API health check
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:5000/health; then
+              echo
+              echo "API is healthy"
+              exit 0
+            fi
+
+            echo "Waiting for API... attempt ${attempt}/30"
+            sleep 2
+          done
+
+          echo "API failed to become healthy"
+          docker logs secure-api-remediated
+          exit 1
+
+      - name: Authenticate and obtain JWT
+        run: |
+          LOGIN_RESPONSE=$(curl --fail-with-body --silent --show-error \
+            -X POST http://127.0.0.1:5000/api/login \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"amr\",\"password\":\"${ADMIN_PASSWORD}\"}")
+
+          ADMIN_TOKEN=$(printf '%s' "${LOGIN_RESPONSE}" | \
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+          test -n "${ADMIN_TOKEN}"
+
+          {
+            echo "ZAP_AUTH_HEADER=Authorization"
+            echo "ZAP_AUTH_HEADER_VALUE=Bearer ${ADMIN_TOKEN}"
+            echo "ZAP_AUTH_HEADER_SITE=secure-api-remediated"
+          } >> "$GITHUB_ENV"
+
+          echo "Authentication succeeded; JWT was not printed."
+
+      - name: Run authenticated OWASP ZAP API scan
+        run: |
+          docker run --rm \
+            --network security-lab \
+            -e ZAP_AUTH_HEADER="${ZAP_AUTH_HEADER}" \
+            -e ZAP_AUTH_HEADER_VALUE="${ZAP_AUTH_HEADER_VALUE}" \
+            -e ZAP_AUTH_HEADER_SITE="${ZAP_AUTH_HEADER_SITE}" \
+            -v "${PWD}:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef \
+            zap-api-scan.py \
+            -t /zap/wrk/openapi-remediated.yaml \
+            -f openapi \
+            -r ci-reports/zap-api-remediated.html \
+            -J ci-reports/zap-api-remediated.json \
+            -I
+
+      - name: Show API logs
+        if: always()
+        run: docker logs secure-api-remediated || true
+
+      - name: Stop DAST environment
+        if: always()
+        run: |
+          docker rm -f secure-api-remediated || true
+          docker network rm security-lab || true
+
+      - name: Upload DAST reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dast-security-reports
+          path: ci-reports/
+          if-no-files-found: warn
+

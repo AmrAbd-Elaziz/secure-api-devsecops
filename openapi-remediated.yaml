@@ -1,0 +1,96 @@
+openapi: 3.0.3
+
+info:
+  title: Remediated Secure DevSecOps API
+  version: 2.0.0
+  description: Remediated API used for authorized local security testing.
+
+servers:
+  - url: http://secure-api-remediated:5000
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+paths:
+  /health:
+    get:
+      summary: Application health check
+      responses:
+        "200":
+          description: Application is healthy
+
+  /api/login:
+    post:
+      summary: Authenticate a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  example: alice
+                password:
+                  type: string
+                  example: invalid-test-password
+      responses:
+        "200":
+          description: Authentication succeeded
+        "401":
+          description: Invalid credentials
+        "429":
+          description: Rate limit exceeded
+
+  /api/users/{user_id}:
+    get:
+      summary: Retrieve an authorized user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            example: 1
+      responses:
+        "200":
+          description: User returned
+        "401":
+          description: Authentication required
+        "403":
+          description: Access denied
+        "404":
+          description: User not found
+
+  /api/search:
+    get:
+      summary: Search users as an administrator
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 50
+            example: alice
+      responses:
+        "200":
+          description: Search completed
+        "400":
+          description: Invalid search input
+        "401":
+          description: Authentication required
+        "403":
+          description: Administrator access required

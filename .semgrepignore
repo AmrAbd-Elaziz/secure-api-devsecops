@@ -1,0 +1,5 @@
+.venv/
+.git/
+security-reports/
+users.db
+__pycache__/

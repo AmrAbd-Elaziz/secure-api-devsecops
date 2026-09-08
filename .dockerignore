@@ -1,0 +1,11 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+users.db
+users_secure.db
+.env
+security-reports
+screenshots
+README.md
