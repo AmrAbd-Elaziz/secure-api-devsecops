@@ -8,6 +8,8 @@ updates:
       day: "monday"
       time: "08:00"
       timezone: "Africa/Cairo"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps(pip)"
@@ -19,6 +21,8 @@ updates:
       day: "monday"
       time: "08:15"
       timezone: "Africa/Cairo"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 3
     commit-message:
       prefix: "deps(docker)"
@@ -30,6 +34,8 @@ updates:
       day: "monday"
       time: "08:30"
       timezone: "Africa/Cairo"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 3
     commit-message:
       prefix: "deps(actions)"
