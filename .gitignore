@@ -8,3 +8,5 @@ ci-reports/
 # Local runtime databases
 /users.db
 /users_secure.db
+# Local screenshots, terminal logs and private evidence
+/evidence-local/
