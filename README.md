@@ -1,5 +1,3 @@
-AppSecGate README.md — Copy/Paste Version
-Copy everything below this line into README.md. The Markdown syntax is preserved as plain text.
 ────────────────────────────────────────────────────────────────────────
 <div align="center">
  
