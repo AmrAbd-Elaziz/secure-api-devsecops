@@ -10,7 +10,7 @@ limits==5.8.0
 MarkupSafe==3.0.3
 ordered-set==4.1.0
 packaging==26.3
-PyJWT==2.13.0
+PyJWT==2.15.1
 typing_extensions==4.16.0
 Werkzeug==3.1.8
 wrapt==2.4.0
